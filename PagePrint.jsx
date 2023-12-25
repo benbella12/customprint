@@ -6,20 +6,6 @@ import style from './bsstyle.css';
 import axios from 'axios';
 const BonDeSortiePrint = () => {
   const { id } = useParams();
-  const [ref, setRef] = useState('');
-  const [date, setDate] = useState('');
-  const [temperature, setTemperature] = useState('');
-  const [pallete, setPallete] = useState('');
-  const [caisse, setCaisse] = useState('');
-  const [harvestDate, setHarvestDate] = useState('');
-  const [destination, setDestination] = useState('');
-  const [domaine, setDomaine] = useState('');
-  const [articles, setArticles] = useState([]);
-  const [totalCaisse, setTotalCaisse] = useState(0);
-  const [totalKg, setTotalKg] = useState(0);
-  const [chauffeur, setChauffeur] = useState('');
-  const [matricule, setMatricule] = useState('');
-  const [traitments, setTraitments] = useState([]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -31,21 +17,8 @@ const BonDeSortiePrint = () => {
           }
         };
         const response = await axios.get('http://192.168.1.235:80/api/bonsortie/' + id, config);
-        const parsedDate = dayjs(response.data.bs_date);
-        const formattedDate = parsedDate.format('DD/MM/YYYY');
-        setRef(response.data.ref);
-        setDate(formattedDate);
-        setTemperature(response.data.temperature);
-        setPallete(response.data.number_pallet);
-        setCaisse(response.data.number_tray);
-        setHarvestDate(formatDateTime(response.data.harvest_start_date));
-        setDestination(response.data.client.name);
-        setDomaine(response.data.farm && response.data.farm.name);
-        setChauffeur(response.data.driver_name);
-        setMatricule(response.data.driver_registration_number);
+
         const mappedData = response.data.details.map((item) => {
-          setTotalCaisse((prevTotal) => prevTotal + item.harvest_tray);
-          setTotalKg((prevTotal) => prevTotal + item.harvest_kg);
           return {
             harvestCaisse: item.harvest_tray,
             harvestKg: item.harvest_kg,
@@ -66,58 +39,104 @@ const BonDeSortiePrint = () => {
             name: item.pesticide && item.pesticide.name_commercial
           };
         });
-        setArticles(mappedData);
-        setTraitments(phytosanitaires);
 
-        var dataCouter = 0;
+        var pageCounte = parseInt((phytosanitaires.length + mappedData.length) / 10);
+        var currentPage = 1;
+        var dataCouter = 1;
         var page = generateDiv();
-        createHeader(page);
-
+        createHeader(page, pageCounte, currentPage);
+        currentPage++;
         generatePrintContent(response.data, page);
         var tableElement = null;
-         var totalKg = null;
+        var articleElement = null;
+        var totalKg = null;
         var totalTray = null;
+        var initialArticle = null;
+        var initialTable = null;
         for (let i = 0; i < mappedData.length; i++) {
-          if (i == 0 || dataCouter == 20) {
-            if (i != 0) {
-              page = generateDiv();
-              createHeader(page);
-            }
+          if (i == 0) {
+            articleElement = document.createElement('article');
+            tableElement = document.createElement('table');
+          }
+          if (dataCouter == 0) {
+            page.appendChild(articleElement);
+            page = generateDiv();
+            createHeader(page, pageCounte, currentPage);
+            currentPage++;
+            generatePrintContent(response.data, page);
+            articleElement = document.createElement('article');
             tableElement = document.createElement('table');
           }
           totalKg = totalKg + mappedData[i].harvestKg;
           totalTray = totalTray + mappedData[i].harvestCaisse;
-          generateArticle(dataCouter, tableElement, page, mappedData[i], i == mappedData.length - 1 ? totalKg : null, totalTray);
+          generateArticle(
+            articleElement,
+            i,
+            tableElement,
+            page,
+            mappedData[i],
+            i == mappedData.length - 1 ? totalKg : null,
+            totalTray,
+            dataCouter
+          );
 
           dataCouter++;
+          if (dataCouter > 20) {
+            dataCouter = 0;
+          }
+          if (i == mappedData.length - 1) {
+            page.appendChild(articleElement);
+          }
         }
-        
 
         for (let i = 0; i < phytosanitaires.length; i++) {
           if (i == 0) {
-             var initialArticle = document.createElement('article');
-             var initialTable = document.createElement('table');
+            initialArticle = document.createElement('article');
+            initialTable = document.createElement('table');
           }
-          generatePhytosanitaryTable(i, initialTable, initialArticle, phytosanitaires[i]);
-          dataCouter += 2;
+          if (dataCouter == 0 && i != 0) {
+            initialArticle.appendChild(initialTable);
+            // Append the article to the page
+            page.appendChild(initialArticle);
+            page = generateDiv();
+            createHeader(page, pageCounte, currentPage);
+            currentPage++;
+            generatePrintContent(response.data, page);
+            initialArticle = document.createElement('article');
+            initialTable = document.createElement('table');
+          }
+          generatePhytosanitaryTable(i, initialTable, initialArticle, phytosanitaires[i], dataCouter);
+
           if (i == phytosanitaires.length - 1) {
             // Append the table to the article
             initialArticle.appendChild(initialTable);
-
             // Append the article to the page
             page.appendChild(initialArticle);
           }
+          dataCouter += 2;
+          if (dataCouter > 24) {
+            console.log(dataCouter);
+            dataCouter = 0;
+          }
         }
 
-        if (dataCouter > 15) {
+        if (dataCouter > 24) {
           page = generateDiv();
-          createHeader(page);
+          createHeader(page, pageCounte, currentPage);
+          currentPage++;
+          generatePrintContent(response.data, page);
         }
-          generateTransportFooter(page, 'John Doe', 'ABC123', '2023-12-25 10:00 AM');
-   
-        // setTimeout(() => {
-        //   window.print();
-        // }, 2000);
+        generateTransportFooter(
+          response.data.ref,
+          page,
+          response.data.driver_name,
+          response.data.driver_registration_number,
+          formatDateTime(response.data.harvest_start_date)
+        );
+
+        setTimeout(() => {
+          window.print();
+        }, 1200);
       } catch (error) {
         console.error(error);
       }
@@ -136,10 +155,10 @@ const BonDeSortiePrint = () => {
     }).format(date);
   };
 
-  const createHeader = (page) => {
+  const createHeader = (page, pageCounte, currentPage) => {
     // Create header element
     var header = document.createElement('header');
-    header.className = 'print-header';
+    header.className = 'bsheader';
 
     // Create sections and elements
     var section1 = document.createElement('div');
@@ -172,7 +191,7 @@ const BonDeSortiePrint = () => {
     var divider4 = document.createElement('div');
     divider4.className = 'divider horizontal';
     var p3 = document.createElement('p');
-    p3.textContent = 'page: 1/1';
+    p3.textContent = 'page: ' + currentPage + '/' + (pageCounte ? pageCounte : '1');
 
     section3.appendChild(p1);
     section3.appendChild(divider3);
@@ -198,12 +217,10 @@ const BonDeSortiePrint = () => {
     return divElement;
   };
 
-  const generateArticle = (i, tableElement, page, articles, totalKg, totalTray) => {
-    const articleElement = document.createElement('article');
-
+  const generateArticle = (articleElement, i, tableElement, page, articles, totalKg, totalTray, dataCouter) => {
     tableElement.className = 'harvests';
 
-    if (i == 0) {
+    if (i == 0 || dataCouter == 0) {
       // Table Header
       const theadElement = document.createElement('thead');
       const headerRow = document.createElement('tr');
@@ -235,7 +252,7 @@ const BonDeSortiePrint = () => {
       totalTh.textContent = 'Total';
       totalRow.appendChild(totalTh);
       const totalCaisseTd = document.createElement('td');
-      totalCaisseTd.textContent = totalTray;
+      totalCaisseTd.textContent = parseFloat(totalTray).toFixed(2);
       totalRow.appendChild(totalCaisseTd);
       const totalKgTd = document.createElement('td');
       totalKgTd.textContent = totalKg;
@@ -246,9 +263,6 @@ const BonDeSortiePrint = () => {
     tableElement.appendChild(tbodyElement);
 
     articleElement.appendChild(tableElement);
-    if (totalKg != null) {
-      page.appendChild(articleElement);
-    }
   };
 
   const generatePrintContent = (data, page) => {
@@ -301,8 +315,8 @@ const BonDeSortiePrint = () => {
     return table;
   };
 
-  const generatePhytosanitaryTable = (i, table, article, data) => {
-    if (i === 0) {
+  const generatePhytosanitaryTable = (i, table, article, data, couter) => {
+    if (i === 0 || couter == 0) {
       const heading = document.createElement('h2');
       heading.textContent = 'traitements phytosanitaires :';
       article.appendChild(heading);
@@ -336,7 +350,7 @@ const BonDeSortiePrint = () => {
     table.appendChild(tbody);
   };
 
-  const generateTransportFooter = (page, chauffeur, matricule, harvestDate) => {
+  const generateTransportFooter = (ref, page, chauffeur, matricule, harvestDate) => {
     const footer = document.createElement('footer');
 
     const transportArticle = document.createElement('article');
@@ -412,7 +426,7 @@ const BonDeSortiePrint = () => {
     qrCodeDiv.className = 'qrCode';
     const qrCodeImg = document.createElement('img');
     qrCodeImg.alt = '';
-    qrCodeImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=BS2300012';
+    qrCodeImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${ref}`;
     qrCodeDiv.appendChild(qrCodeImg);
 
     bottomSectionDiv.appendChild(signatureDiv);
@@ -422,7 +436,7 @@ const BonDeSortiePrint = () => {
 
     page.appendChild(footer);
   };
-  return <div></div>;
+  return <></>;
 };
 
 export default BonDeSortiePrint;
